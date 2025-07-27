@@ -2,8 +2,8 @@ import sys
 
 SHA3_256_RATE_BITS = 1088
 
-def bytes_to_bit_string(byte_data: bytes) -> str:
-    return ''.join(format(byte, '08b') for byte in byte_data)
+# def bytes_to_bit_string(byte_data: bytes) -> str:
+#     return ''.join(format(byte, '08b') for byte in byte_data)
 
 # applica il padding (il messaggio deve essere divisibile per "r")
 def padding(message_bytes: bytes, rate_in_bits: int) -> bytes:
@@ -35,7 +35,7 @@ def pre_processing(message_bytes: bytes, rate_in_bits: int) -> list[bytes]:
 
 def main():
     if len(sys.argv) < 2:
-        print(f"Uso: python3 {sys.argv[0]} <file>")
+        print(f"Usage: python3 {sys.argv[0]} <file>")
         return
 
     try:
@@ -47,19 +47,16 @@ def main():
     
     blocks = pre_processing(message, SHA3_256_RATE_BITS)
 
-    print(f"Messaggio diviso in {len(blocks)} blocchi.")
-
+    # print(f"Messaggio diviso in {len(blocks)} blocchi.")
     # Itera sui blocchi e stampali in esadecimale e in binario
-    for i, block in enumerate(blocks):
-        print("-" * 40)
-        print(f"Blocco {i} ({len(block)} bytes):")
-        print(f"  Hex: {block.hex()}")
-
-        # Traduci il blocco in una stringa di bit
-        bit_string = bytes_to_bit_string(block)
-
-        print(f"  Bit ({len(bit_string)} bit):")
-        print(f"    {bit_string}")
+    # for i, block in enumerate(blocks):
+    #     print("-" * 40)
+    #     print(f"Blocco {i} ({len(block)} bytes):")
+    #     print(f"  Hex: {block.hex()}")
+    #     # Traduci il blocco in una stringa di bit
+    #     bit_string = bytes_to_bit_string(block)
+    #     print(f"  Bit ({len(bit_string)} bit):")
+    #     print(f"    {bit_string}")
 
 if __name__ == '__main__':
     main()
