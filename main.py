@@ -38,12 +38,37 @@ def pre_processing(message_bytes: bytes, rate_in_bits: int) -> list[bytes]:
     blocks = divide_into_blocks(padded_message, rate_in_bits)
     return blocks
 
+def keccak_f(state: bytearray) -> bytearray:
+    # da implementare le theta, rho, pi, chi e iota.
+    return state
+
+# processa i blocchi del messaggio
+def absorbing(state: bytearray, blocks: list[bytes], rate_in_bytes: int) -> None:
+    for block in blocks:
+        for i in range(rate_in_bytes):
+            state[i] ^= block[i]
+        state = keccak_f(state)
+
+# estrae l'hash finale dallo stato
+def squeezing(state: bytearray, rate_in_bytes: int, output_len_bits: int) -> bytes:
+    output_len_bytes = output_len_bits // 8
+    rate_part = state[:rate_in_bytes]
+    final_hash = rate_part[:output_len_bytes]
+    return bytes(final_hash)
+
+# l'intera costruzione a spugna
+def sponge_construction(blocks: list[bytes], rate_in_bits: int, output_len_bits: int) -> bytes:
+    # lo stato è di 1600 bit = 200 byte
+    state = bytearray(200)
+    rate_in_bytes = rate_in_bits // 8
+    absorbing(state, blocks, rate_in_bytes)
+    final_hash = squeezing(state, rate_in_bytes, output_len_bits)
+    return final_hash
 
 def main():
     if len(sys.argv) < 2:
         print(f"Usage: python3 {sys.argv[0]} <file>")
         return
-
     try:
         with open(sys.argv[1], 'rb') as input_file:
             message = input_file.read()
