@@ -1,45 +1,56 @@
 import sys
+# import hashlib  # decommentare per i test
 
 SHA3_256_RATE_BITS = 1088
 SHA3_OUTPUT_LEN = 256
 
-# def bytes_to_bit_string(byte_data: bytes) -> str:
-#     return ''.join(format(byte, '08b') for byte in byte_data)
+# Costanti di rotazione per rho
+ROTATION_CONSTANTS = [
+    [0, 36, 3, 41, 18],   # x=0
+    [1, 44, 10, 45, 2],   # x=1
+    [62, 6, 43, 15, 61],  # x=2
+    [28, 55, 25, 21, 56], # x=3
+    [27, 20, 39, 8, 14]   # x=4
+]
 
-# applica il padding (il messaggio deve essere divisibile per "r")
+ROUND_CONSTANTS = [
+    0x0000000000000001, 0x0000000000008082, 0x800000000000808a,
+    0x8000000080008000, 0x000000000000808b, 0x0000000080000001,
+    0x8000000080008081, 0x8000000000008009, 0x000000000000008a,
+    0x0000000000000088, 0x0000000080008009, 0x000000008000000a,
+    0x000000008000808b, 0x800000000000008b, 0x8000000000008089,
+    0x8000000000008003, 0x8000000000008002, 0x8000000000000080,
+    0x000000000000800a, 0x800000008000000a, 0x8000000080008081,
+    0x8000000000008080, 0x0000000080000001, 0x8000000080008008
+]
+
 def padding(message_bytes: bytes, rate_in_bits: int) -> bytes:
     rate_in_bytes = rate_in_bits // 8
-    message_bytes += b'\x06' # delimitatore per SHA-3 (00000110)
+    message_bytes += b'\x06'  # delimitatore per SHA-3
     
     zeros_to_add = rate_in_bytes - (len(message_bytes) % rate_in_bytes)
     
-    # se è già multiplo di rate, aggiungi un altro blocco
     if zeros_to_add == 0:
         zeros_to_add = rate_in_bytes
         
     message_bytes += b'\x00' * (zeros_to_add - 1)
-    message_bytes += b'\x80' # ultimo byte del padding (10000000)
+    message_bytes += b'\x80'  # ultimo byte del padding
     
     return message_bytes
 
-# divide una sequenza di byte paddata in una lista di blocchi.
 def divide_into_blocks(padded_bytes: bytes, rate_in_bits: int) -> list[bytes]:
     rate_in_bytes = rate_in_bits // 8
     blocks = []
     for i in range(0, len(padded_bytes), rate_in_bytes):
-        start = i
-        end = i + rate_in_bytes
-        block = padded_bytes[start:end]
+        block = padded_bytes[i:i + rate_in_bytes]
         blocks.append(block)
     return blocks
 
-# esegue padding e divisione in blocchi.
 def pre_processing(message_bytes: bytes, rate_in_bits: int) -> list[bytes]:
     padded_message = padding(message_bytes, rate_in_bits)
     blocks = divide_into_blocks(padded_message, rate_in_bits)
     return blocks
 
-# converte una sequenza di byte in una lista di "lane" a 64 bit
 def bytes_to_lanes(byte_data: bytearray) -> list[int]:
     lanes = []
     for i in range(0, 200, 8):
@@ -47,7 +58,6 @@ def bytes_to_lanes(byte_data: bytearray) -> list[int]:
         lanes.append(lane)
     return lanes
 
-# converte una lista di "lane" a 64 bit in una sequenza di byte
 def lanes_to_bytes(lanes: list[int]) -> bytearray:
     byte_data = bytearray()
     for lane in lanes:
@@ -58,103 +68,142 @@ def ROL64(a, n):
     mask = 0xFFFFFFFFFFFFFFFF
     return ((a << n) | (a >> (64 - n))) & mask
 
-# theta round fuction
 def theta(A: list[list[int]]) -> list[list[int]]:
+    # Calcola la parità delle colonne
     C = []
     for x in range(5):
-        column_parity = A[0][x] ^ A[1][x] ^ A[2][x] ^ A[3][x] ^ A[4][x]
+        column_parity = 0
+        for y in range(5):
+            column_parity ^= A[x][y]
         C.append(column_parity)
-        
+    
+    # Calcola D
     D = []
     for x in range(5):
-        prev_column_parity = C[(x - 1) % 5]
-        next_column_parity_rotated = ROL64(C[(x + 1) % 5], 1)
-        D.append(prev_column_parity ^ next_column_parity_rotated)
-    # Applica il risultato allo stato A
+        D.append(C[(x - 1) % 5] ^ ROL64(C[(x + 1) % 5], 1))
+    
+    # Applica a ogni elemento
     A_new = [[0]*5 for _ in range(5)]
-    for y in range(5):
-        for x in range(5):
-            A_new[y][x] = A[y][x] ^ D[x]
+    for x in range(5):
+        for y in range(5):
+            A_new[x][y] = A[x][y] ^ D[x]
             
     return A_new
 
-# funzione di permutazione principale
-def keccak_f(state: bytearray) -> bytearray:
-    # Converte i byte in una lista di 25 "lane"
-    lanes = bytes_to_lanes(state)
-    A = []
-    for i in range(5):
-        row = []
-        for j in range(5):
-            index = i * 5 + j
-            row.append(lanes[index])
-        A.append(row)
+def rho(A: list[list[int]]) -> list[list[int]]:
+    A_new = [[0]*5 for _ in range(5)]
+    for x in range(5):
+        for y in range(5):
+            A_new[x][y] = ROL64(A[x][y], ROTATION_CONSTANTS[x][y])
+    return A_new
 
-    # inizio dei 24 round di SHA-3
+def pi(A: list[list[int]]) -> list[list[int]]:
+    A_new = [[0]*5 for _ in range(5)]
+    for x in range(5):
+        for y in range(5):
+            A_new[x][y] = A[(x + 3*y) % 5][x]
+    return A_new
+
+def chi(A: list[list[int]]) -> list[list[int]]:
+    A_new = [[0]*5 for _ in range(5)]
+    for x in range(5):
+        for y in range(5):
+            A_new[x][y] = A[x][y] ^ ((A[(x+1)%5][y] ^ 0xFFFFFFFFFFFFFFFF) & A[(x+2)%5][y])
+    return A_new
+
+def iota(A: list[list[int]], round_index: int) -> list[list[int]]:
+    A[0][0] ^= ROUND_CONSTANTS[round_index]
+    return A
+
+def keccak_f(state: bytearray) -> bytearray:
+    # Converti byte in lanes
+    lanes = bytes_to_lanes(state)
+    
+    # Organizza in matrice 5x5 con A[x][y]
+    A = [[0]*5 for _ in range(5)]
+    for x in range(5):
+        for y in range(5):
+            A[x][y] = lanes[x + 5*y]
+
+    # 24 round
     for round_index in range(24):
         A = theta(A)
-        # A = rho(A)
-        # A = pi(A)
-        # A = chi(A)
-        # A = iota(A, round_index)
+        A = rho(A)
+        A = pi(A)
+        A = chi(A)
+        A = iota(A, round_index)
 
-    # Riconverte la matrice 5x5 in una lista singola
+    # Riconverti in lanes
     lanes_flat = []
-    for i in range(5):
-        for j in range(5):
-            lanes_flat.append(A[i][j])
+    for y in range(5):
+        for x in range(5):
+            lanes_flat.append(A[x][y])
 
-    # Riconverte la lista di lane in byte
     return lanes_to_bytes(lanes_flat)
 
-# processa i blocchi del messaggio
-def absorbing(state: bytearray, blocks: list[bytes], rate_in_bytes: int) -> None:
+def absorbing(state: bytearray, blocks: list[bytes], rate_in_bytes: int) -> bytearray:
     for block in blocks:
         for i in range(rate_in_bytes):
             state[i] ^= block[i]
         state = keccak_f(state)
+    return state
 
-# estrae l'hash finale dallo stato
 def squeezing(state: bytearray, rate_in_bytes: int, output_len_bits: int) -> bytes:
     output_len_bytes = output_len_bits // 8
-    rate_part = state[:rate_in_bytes]
-    final_hash = rate_part[:output_len_bytes]
-    return bytes(final_hash)
+    return bytes(state[:output_len_bytes])
 
-# l'intera costruzione a spugna
 def sponge_construction(blocks: list[bytes], rate_in_bits: int, output_len_bits: int) -> bytes:
-    # lo stato è di 1600 bit = 200 byte
     state = bytearray(200)
     rate_in_bytes = rate_in_bits // 8
-    absorbing(state, blocks, rate_in_bytes)
-    final_hash = squeezing(state, rate_in_bytes, output_len_bits)
-    return final_hash
+    state = absorbing(state, blocks, rate_in_bytes)
+    return squeezing(state, rate_in_bytes, output_len_bits)
+
+def sha3_256(message: bytes) -> bytes:
+    blocks = pre_processing(message, SHA3_256_RATE_BITS)
+    return sponge_construction(blocks, SHA3_256_RATE_BITS, SHA3_OUTPUT_LEN)
+
+# Test
+def test_implementation():
+    test_cases = [
+        (b"", "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"),
+        (b"abc", "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532"),
+        (b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", 
+         "41c0dba2a9d6240849100376a8235e2c82e1b9998a999e21db32dd97496d3376"),
+    ]
+    
+    print("Test dell'implementazione SHA3-256:\n")
+    all_passed = True
+    for msg, expected in test_cases:
+        my_hash = sha3_256(msg).hex()
+        std_hash = hashlib.sha3_256(msg).hexdigest()
+        if my_hash == expected and my_hash == std_hash:
+            status = "✓ PASS"
+        else:
+            status = "✗ FAIL"
+            all_passed = False
+        print(f"{status} - Input: {repr(msg[:20])}{'...' if len(msg) > 20 else ''}")
+        print(f"  Risultato: {my_hash}")
+        print(f"  Atteso:    {expected}")
+        print()
+    if all_passed:
+        print("🎉 Tutti i test sono passati! L'implementazione è corretta.")
+    else:
+        print("❌ Alcuni test sono falliti.")
+    return all_passed
 
 def main():
     if len(sys.argv) < 2:
         print(f"Usage: python3 {sys.argv[0]} <file>")
+        # test_implementation()
         return
     try:
         with open(sys.argv[1], 'rb') as input_file:
             message = input_file.read()
     except FileNotFoundError:
-        print(f"Errore: file non trovato '{sys.argv[1]}'")
+        print(f"Error: file not found '{sys.argv[1]}'")
         return
-    
-    blocks = pre_processing(message, SHA3_256_RATE_BITS)
-    final_hash = sponge_construction(blocks, SHA3_256_RATE_BITS, SHA3_OUTPUT_LEN)
-    print(final_hash.hex())
-
-    # print(f"Messaggio diviso in {len(blocks)} blocchi.")
-    # Itera sui blocchi e stampali in esadecimale e in binario
-    # for i, block in enumerate(blocks):
-    #     print("-" * 40)
-    #     print(f"Blocco {i} ({len(block)} bytes):")
-    #     print(f"  Hex: {block.hex()}")
-    #     # Traduci il blocco in una stringa di bit
-    #     bit_string = bytes_to_bit_string(block)
-    #     print(f"  Bit ({len(bit_string)} bit):")
-    #     print(f"    {bit_string}")
+    hash_result = sha3_256(message)
+    print(hash_result.hex())
 
 if __name__ == '__main__':
     main()
