@@ -24,7 +24,13 @@ def padding(message_bytes: bytes, rate_in_bits: int) -> bytes:
 # divide una sequenza di byte paddata in una lista di blocchi.
 def divide_into_blocks(padded_bytes: bytes, rate_in_bits: int) -> list[bytes]:
     rate_in_bytes = rate_in_bits // 8
-    return [padded_bytes[i:i+rate_in_bytes] for i in range(0, len(padded_bytes), rate_in_bytes)]
+    blocks = []
+    for i in range(0, len(padded_bytes), rate_in_bytes):
+        start = i
+        end = i + rate_in_bytes
+        block = padded_bytes[start:end]
+        blocks.append(block)
+    return blocks
 
 # esegue padding e divisione in blocchi.
 def pre_processing(message_bytes: bytes, rate_in_bits: int) -> list[bytes]:
