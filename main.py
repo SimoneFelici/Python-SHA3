@@ -1,18 +1,25 @@
 import sys
-# import hashlib  # decommentare per i test
 
 SHA3_256_RATE_BITS = 1088
 SHA3_OUTPUT_LEN = 256
 ROUND_NUM = 24
 
+STATE = 1600
+STATE_IN_BYTES = STATE // 8  # 200
+
+LANE_SIZE_BITS = 64
+LANE_SIZE_BYTES = LANE_SIZE_BITS // 8  # 8
+
+MATRIX_DIM = 5
+
 # Costanti di rotazione per rho
 ROTATION_CONSTANTS = [
 #   y=0 y=1 y=2 y=3 y=4
-    [0, 36, 3, 41, 18],   # x=0
-    [1, 44, 10, 45, 2],   # x=1
-    [62, 6, 43, 15, 61],  # x=2
-    [28, 55, 25, 21, 56], # x=3
-    [27, 20, 39, 8, 14]   # x=4
+    [0, 36, 3, 41, 18],    # x=0
+    [1, 44, 10, 45, 2],    # x=1
+    [62, 6, 43, 15, 61],   # x=2
+    [28, 55, 25, 21, 56],  # x=3
+    [27, 20, 39, 8, 14]    # x=4
 ]
 
 ROUND_CONSTANTS = [
@@ -55,56 +62,56 @@ def pre_processing(message_bytes: bytes, rate_in_bits: int) -> list[bytes]:
 
 def bytes_to_lanes(byte_data: bytearray) -> list[int]:
     lanes = []
-    for i in range(0, 200, 8):
-        lane = int.from_bytes(byte_data[i:i+8], 'little')
+    for i in range(0, STATE_IN_BYTES, LANE_SIZE_BYTES):
+        lane = int.from_bytes(byte_data[i:i+LANE_SIZE_BYTES], 'little')
         lanes.append(lane)
     return lanes
 
 def lanes_to_bytes(lanes: list[int]) -> bytearray:
     byte_data = bytearray()
     for lane in lanes:
-        byte_data.extend(lane.to_bytes(8, 'little'))
+        byte_data.extend(lane.to_bytes(LANE_SIZE_BYTES, 'little'))
     return byte_data
 
 def ROL64(a, n):
     mask = 0xFFFFFFFFFFFFFFFF
-    return ((a << n) | (a >> (64 - n))) & mask
+    return ((a << n) | (a >> (LANE_SIZE_BITS - n))) & mask
 
 def theta(A: list[list[int]]) -> list[list[int]]:
     C = []
-    for x in range(5):
+    for x in range(MATRIX_DIM):
         column_parity = 0
-        for y in range(5):
+        for y in range(MATRIX_DIM):
             column_parity ^= A[x][y]
         C.append(column_parity)
     D = []
-    for x in range(5):
-        D.append(C[(x - 1) % 5] ^ ROL64(C[(x + 1) % 5], 1))
-    A_new = [[0]*5 for _ in range(5)]
-    for x in range(5):
-        for y in range(5):
+    for x in range(MATRIX_DIM):
+        D.append(C[(x - 1) % MATRIX_DIM] ^ ROL64(C[(x + 1) % MATRIX_DIM], 1))
+    A_new = [[0]*MATRIX_DIM for _ in range(MATRIX_DIM)]
+    for x in range(MATRIX_DIM):
+        for y in range(MATRIX_DIM):
             A_new[x][y] = A[x][y] ^ D[x]
     return A_new
 
 def rho(A: list[list[int]]) -> list[list[int]]:
-    A_new = [[0]*5 for _ in range(5)]
-    for x in range(5):
-        for y in range(5):
+    A_new = [[0]*MATRIX_DIM for _ in range(MATRIX_DIM)]
+    for x in range(MATRIX_DIM):
+        for y in range(MATRIX_DIM):
             A_new[x][y] = ROL64(A[x][y], ROTATION_CONSTANTS[x][y])
     return A_new
 
 def pi(A: list[list[int]]) -> list[list[int]]:
-    A_new = [[0]*5 for _ in range(5)]
-    for x in range(5):
-        for y in range(5):
-            A_new[x][y] = A[(x + 3*y) % 5][x]
+    A_new = [[0]*MATRIX_DIM for _ in range(MATRIX_DIM)]
+    for x in range(MATRIX_DIM):
+        for y in range(MATRIX_DIM):
+            A_new[x][y] = A[(x + 3*y) % MATRIX_DIM][x]
     return A_new
 
 def chi(A: list[list[int]]) -> list[list[int]]:
-    A_new = [[0]*5 for _ in range(5)]
-    for x in range(5):
-        for y in range(5):
-            A_new[x][y] = A[x][y] ^ ((A[(x+1)%5][y] ^ 0xFFFFFFFFFFFFFFFF) & A[(x+2)%5][y])
+    A_new = [[0]*MATRIX_DIM for _ in range(MATRIX_DIM)]
+    for x in range(MATRIX_DIM):
+        for y in range(MATRIX_DIM):
+            A_new[x][y] = A[x][y] ^ ((A[(x+1)%MATRIX_DIM][y] ^ 0xFFFFFFFFFFFFFFFF) & A[(x+2)%MATRIX_DIM][y])
     return A_new
 
 def iota(A: list[list[int]], round_index: int) -> list[list[int]]:
@@ -114,10 +121,10 @@ def iota(A: list[list[int]], round_index: int) -> list[list[int]]:
 def keccak_f(state: bytearray) -> bytearray:
     lanes = bytes_to_lanes(state)
     # prepara la matrice 5x5
-    A = [[0]*5 for _ in range(5)]
-    for x in range(5):
-        for y in range(5):
-            A[x][y] = lanes[x + 5*y]
+    A = [[0]*MATRIX_DIM for _ in range(MATRIX_DIM)]
+    for x in range(MATRIX_DIM):
+        for y in range(MATRIX_DIM):
+            A[x][y] = lanes[x + MATRIX_DIM*y]
 
     # 24 round
     for round_index in range(ROUND_NUM):
@@ -129,8 +136,8 @@ def keccak_f(state: bytearray) -> bytearray:
 
     # riconverte la matrice
     lanes_flat = []
-    for y in range(5):
-        for x in range(5):
+    for y in range(MATRIX_DIM):
+        for x in range(MATRIX_DIM):
             lanes_flat.append(A[x][y])
 
     return lanes_to_bytes(lanes_flat)
@@ -147,7 +154,7 @@ def squeezing(state: bytearray, rate_in_bytes: int, output_len_bits: int) -> byt
     return bytes(state[:output_len_bytes])
 
 def sponge_construction(blocks: list[bytes], rate_in_bits: int, output_len_bits: int) -> bytes:
-    state = bytearray(200)
+    state = bytearray(STATE_IN_BYTES)
     rate_in_bytes = rate_in_bits // 8
     state = absorbing(state, blocks, rate_in_bytes)
     return squeezing(state, rate_in_bytes, output_len_bits)
@@ -156,38 +163,9 @@ def sha3_256(message: bytes) -> bytes:
     blocks = pre_processing(message, SHA3_256_RATE_BITS)
     return sponge_construction(blocks, SHA3_256_RATE_BITS, SHA3_OUTPUT_LEN)
 
-# Test
-def test_implementation():
-    test_cases = [
-        (b"", "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"),
-        (b"abc", "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532"),
-        (b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", 
-         "41c0dba2a9d6240849100376a8235e2c82e1b9998a999e21db32dd97496d3376"),
-    ]
-    print("Test dell'implementazione SHA3-256:\n")
-    all_passed = True
-    for msg, expected in test_cases:
-        my_hash = sha3_256(msg).hex()
-        std_hash = hashlib.sha3_256(msg).hexdigest()
-        if my_hash == expected and my_hash == std_hash:
-            status = "✓ PASS"
-        else:
-            status = "✗ FAIL"
-            all_passed = False
-        print(f"{status} - Input: {repr(msg[:20])}{'...' if len(msg) > 20 else ''}")
-        print(f"  Risultato: {my_hash}")
-        print(f"  Atteso:    {expected}")
-        print()
-    if all_passed:
-        print("🎉 Tutti i test sono passati! L'implementazione è corretta.")
-    else:
-        print("❌ Alcuni test sono falliti.")
-    return all_passed
-
 def main():
     if len(sys.argv) < 2:
         print(f"Usage: python3 {sys.argv[0]} <file>")
-        # test_implementation()
         return
     try:
         with open(sys.argv[1], 'rb') as input_file:
