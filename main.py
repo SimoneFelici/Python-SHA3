@@ -3,6 +3,7 @@ import sys
 
 SHA3_256_RATE_BITS = 1088
 SHA3_OUTPUT_LEN = 256
+ROUND_NUM = 24
 
 # Costanti di rotazione per rho
 ROTATION_CONSTANTS = [
@@ -28,15 +29,15 @@ ROUND_CONSTANTS = [
 def padding(message_bytes: bytes, rate_in_bits: int) -> bytes:
     rate_in_bytes = rate_in_bits // 8
     message_bytes += b'\x06'  # delimitatore per SHA-3
-    
+
     zeros_to_add = rate_in_bytes - (len(message_bytes) % rate_in_bytes)
-    
+
     if zeros_to_add == 0:
         zeros_to_add = rate_in_bytes
-        
+
     message_bytes += b'\x00' * (zeros_to_add - 1)
     message_bytes += b'\x80'  # ultimo byte del padding
-    
+
     return message_bytes
 
 def divide_into_blocks(padded_bytes: bytes, rate_in_bits: int) -> list[bytes]:
@@ -70,25 +71,19 @@ def ROL64(a, n):
     return ((a << n) | (a >> (64 - n))) & mask
 
 def theta(A: list[list[int]]) -> list[list[int]]:
-    # Calcola la parità delle colonne
     C = []
     for x in range(5):
         column_parity = 0
         for y in range(5):
             column_parity ^= A[x][y]
         C.append(column_parity)
-    
-    # Calcola D
     D = []
     for x in range(5):
         D.append(C[(x - 1) % 5] ^ ROL64(C[(x + 1) % 5], 1))
-    
-    # Applica a ogni elemento
     A_new = [[0]*5 for _ in range(5)]
     for x in range(5):
         for y in range(5):
             A_new[x][y] = A[x][y] ^ D[x]
-            
     return A_new
 
 def rho(A: list[list[int]]) -> list[list[int]]:
@@ -117,24 +112,22 @@ def iota(A: list[list[int]], round_index: int) -> list[list[int]]:
     return A
 
 def keccak_f(state: bytearray) -> bytearray:
-    # Converti byte in lanes
     lanes = bytes_to_lanes(state)
-    
-    # Organizza in matrice 5x5 con A[x][y]
+    # prepara la matrice 5x5
     A = [[0]*5 for _ in range(5)]
     for x in range(5):
         for y in range(5):
             A[x][y] = lanes[x + 5*y]
 
     # 24 round
-    for round_index in range(24):
+    for round_index in range(ROUND_NUM):
         A = theta(A)
         A = rho(A)
         A = pi(A)
         A = chi(A)
         A = iota(A, round_index)
 
-    # Riconverti in lanes
+    # riconverte la matrice
     lanes_flat = []
     for y in range(5):
         for x in range(5):
@@ -171,7 +164,6 @@ def test_implementation():
         (b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", 
          "41c0dba2a9d6240849100376a8235e2c82e1b9998a999e21db32dd97496d3376"),
     ]
-    
     print("Test dell'implementazione SHA3-256:\n")
     all_passed = True
     for msg, expected in test_cases:
