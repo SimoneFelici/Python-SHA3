@@ -6,12 +6,12 @@ SHA3_OUTPUT_LEN = 256
 
 # Costanti di rotazione per rho
 ROTATION_CONSTANTS = [
+#   y=0 y=1 y=2 y=3 y=4
     [0, 36, 3, 41, 18],   # x=0
     [1, 44, 10, 45, 2],   # x=1
     [62, 6, 43, 15, 61],  # x=2
     [28, 55, 25, 21, 56], # x=3
     [27, 20, 39, 8, 14]   # x=4
-#    y=0 y=1 y=2 y=3 y=4
 ]
 
 ROUND_CONSTANTS = [
