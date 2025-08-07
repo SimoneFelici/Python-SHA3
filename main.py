@@ -1,26 +1,26 @@
 import sys
+import struct
 
 SHA3_256_RATE_BITS = 1088
 SHA3_OUTPUT_LEN = 256
 ROUND_NUM = 24
 
 STATE = 1600
-STATE_IN_BYTES = STATE // 8  # 200
-
+STATE_IN_BYTES = 200  # STATE // 8
 LANE_SIZE_BITS = 64
-LANE_SIZE_BYTES = LANE_SIZE_BITS // 8  # 8
+LANE_SIZE_BYTES = 8 # LANE_SIZE_BITS // 8
 
 MATRIX_DIM = 5
 
 # Costanti di rotazione per rho
-ROTATION_CONSTANTS = [
+ROTATION_CONSTANTS = (
 #   y=0 y=1 y=2 y=3 y=4
-    [0, 36, 3, 41, 18],    # x=0
-    [1, 44, 10, 45, 2],    # x=1
-    [62, 6, 43, 15, 61],   # x=2
-    [28, 55, 25, 21, 56],  # x=3
-    [27, 20, 39, 8, 14]    # x=4
-]
+    (0, 36, 3, 41, 18),    # x=0
+    (1, 44, 10, 45, 2),    # x=1
+    (62, 6, 43, 15, 61),   # x=2
+    (28, 55, 25, 21, 56),  # x=3
+    (27, 20, 39, 8, 14)    # x=4
+)
 
 ROUND_CONSTANTS = [
     0x0000000000000001, 0x0000000000008082, 0x800000000000808a,
@@ -61,62 +61,50 @@ def pre_processing(message_bytes: bytes, rate_in_bits: int) -> list[bytes]:
     return blocks
 
 def bytes_to_lanes(byte_data: bytearray) -> list[int]:
-    lanes = []
-    for i in range(0, STATE_IN_BYTES, LANE_SIZE_BYTES):
-        lane = int.from_bytes(byte_data[i:i+LANE_SIZE_BYTES], 'little')
-        lanes.append(lane)
-    return lanes
+    return list(struct.unpack('<25Q', byte_data))
 
 def lanes_to_bytes(lanes: list[int]) -> bytearray:
-    byte_data = bytearray()
-    for lane in lanes:
-        byte_data.extend(lane.to_bytes(LANE_SIZE_BYTES, 'little'))
-    return byte_data
+    return bytearray(struct.pack('<25Q', *lanes))
 
 def ROL64(a, n):
     mask = 0xFFFFFFFFFFFFFFFF
     return ((a << n) | (a >> (LANE_SIZE_BITS - n))) & mask
 
-def theta(A: list[list[int]]) -> list[list[int]]:
-    C = []
-    for x in range(MATRIX_DIM):
-        column_parity = 0
-        for y in range(MATRIX_DIM):
-            column_parity ^= A[x][y]
-        C.append(column_parity)
-    D = []
-    for x in range(MATRIX_DIM):
-        D.append(C[(x - 1) % MATRIX_DIM] ^ ROL64(C[(x + 1) % MATRIX_DIM], 1))
-    A_new = [[0]*MATRIX_DIM for _ in range(MATRIX_DIM)]
-    for x in range(MATRIX_DIM):
-        for y in range(MATRIX_DIM):
-            A_new[x][y] = A[x][y] ^ D[x]
-    return A_new
+def theta(A: list[list[int]]) -> None:
+    C = [0] * MATRIX_DIM
+    D = [0] * MATRIX_DIM
 
-def rho(A: list[list[int]]) -> list[list[int]]:
-    A_new = [[0]*MATRIX_DIM for _ in range(MATRIX_DIM)]
     for x in range(MATRIX_DIM):
         for y in range(MATRIX_DIM):
-            A_new[x][y] = ROL64(A[x][y], ROTATION_CONSTANTS[x][y])
-    return A_new
+            C[x] ^= A[x][y]
 
-def pi(A: list[list[int]]) -> list[list[int]]:
-    A_new = [[0]*MATRIX_DIM for _ in range(MATRIX_DIM)]
+    for x in range(MATRIX_DIM):
+        D[x] = C[(x - 1) % MATRIX_DIM] ^ ((C[(x + 1) % MATRIX_DIM] << 1) | (C[(x + 1) % MATRIX_DIM] >> (64 - 1))) & 0xFFFFFFFFFFFFFFFF
+
     for x in range(MATRIX_DIM):
         for y in range(MATRIX_DIM):
-            A_new[x][y] = A[(x + 3*y) % MATRIX_DIM][x]
-    return A_new
+            A[x][y] ^= D[x]
 
-def chi(A: list[list[int]]) -> list[list[int]]:
-    A_new = [[0]*MATRIX_DIM for _ in range(MATRIX_DIM)]
+def rho(A: list[list[int]]) -> None:
     for x in range(MATRIX_DIM):
         for y in range(MATRIX_DIM):
-            A_new[x][y] = A[x][y] ^ ((A[(x+1)%MATRIX_DIM][y] ^ 0xFFFFFFFFFFFFFFFF) & A[(x+2)%MATRIX_DIM][y])
-    return A_new
+            shift = ROTATION_CONSTANTS[x][y]
+            A[x][y] = ((A[x][y] << shift) | (A[x][y] >> (64 - shift))) & 0xFFFFFFFFFFFFFFFF
 
-def iota(A: list[list[int]], round_index: int) -> list[list[int]]:
+def pi(A: list[list[int]]) -> None:
+    temp = [[A[x][y] for y in range(MATRIX_DIM)] for x in range(MATRIX_DIM)]
+    for x in range(MATRIX_DIM):
+        for y in range(MATRIX_DIM):
+            A[x][y] = temp[(x + 3 * y) % MATRIX_DIM][x]
+
+def chi(A: list[list[int]]) -> None:
+    for y in range(MATRIX_DIM):
+        temp_row = [A[x][y] for x in range(MATRIX_DIM)]
+        for x in range(MATRIX_DIM):
+            A[x][y] ^= (~temp_row[(x + 1) % MATRIX_DIM] & temp_row[(x + 2) % MATRIX_DIM])
+
+def iota(A: list[list[int]], round_index: int) -> None:
     A[0][0] ^= ROUND_CONSTANTS[round_index]
-    return A
 
 def keccak_f(state: bytearray) -> bytearray:
     lanes = bytes_to_lanes(state)
@@ -128,11 +116,11 @@ def keccak_f(state: bytearray) -> bytearray:
 
     # 24 round
     for round_index in range(ROUND_NUM):
-        A = theta(A)
-        A = rho(A)
-        A = pi(A)
-        A = chi(A)
-        A = iota(A, round_index)
+        theta(A)
+        rho(A)
+        pi(A)
+        chi(A)
+        iota(A, round_index)
 
     # riconverte la matrice
     lanes_flat = []
