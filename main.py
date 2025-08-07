@@ -66,10 +66,6 @@ def bytes_to_lanes(byte_data: bytearray) -> list[int]:
 def lanes_to_bytes(lanes: list[int]) -> bytearray:
     return bytearray(struct.pack('<25Q', *lanes))
 
-def ROL64(a, n):
-    mask = 0xFFFFFFFFFFFFFFFF
-    return ((a << n) | (a >> (LANE_SIZE_BITS - n))) & mask
-
 def theta(A: list[list[int]]) -> None:
     C = [0] * MATRIX_DIM
     D = [0] * MATRIX_DIM
